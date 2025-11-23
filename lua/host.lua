@@ -3,19 +3,31 @@ local M = {}
 M.buffers = {}
 M.server_job = nil
 M.channel = ""
-
 M.server_dir = vim.fs.normalize(debug.getinfo(1, "S").source:sub(2):match("(.*/)") .. "../server")
+
+local function listen_to_server(_, data)
+	if data then
+		print("Server: " .. data)
+	end
+end
+
+--- @class opts
+--- @field logger fun(_, data: string|string[])
+M.opts = {
+	logger = listen_to_server,
+}
+
+--- @param opts opts
+function M.setup(opts)
+	for k, v in ipairs(opts) do
+		M.opts[k] = v
+	end
+end
 
 local SERVER_FILENAME = "server"
 
 function M.send(self, data)
 	vim.fn.chansend(self.channel, data)
-end
-
-local function scrap_buffer()
-	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, true)
-	local text = table.concat(lines, "\n")
-	M.buffers.main = text
 end
 
 local function handle_callback(_, data)
@@ -26,7 +38,6 @@ local function cleanup()
 	if M.server_job and M.server_job.pid then
 		M.server_job:kill(9)
 		M.server_job = nil
-		--vim.jobstop(M.server_job.pid)
 	end
 
 	if M.channel and M.channel ~= 0 then
@@ -51,12 +62,6 @@ local function connect_to_server()
 	else
 		print("Host connected to TCP socket:", M.channel)
 		vim.fn.chansend(M.channel, "Witam z serwera")
-	end
-end
-
-local function listen_to_server(_, data)
-	if data then
-		print("Server: " .. data)
 	end
 end
 
@@ -89,7 +94,6 @@ vim.api.nvim_create_user_command("Start", function()
 end, {})
 
 local server_cleanup_group = vim.api.nvim_create_augroup("ServerCleanup", { clear = true })
-
 vim.api.nvim_create_autocmd("VimLeavePre", {
 	group = server_cleanup_group,
 	callback = cleanup,
