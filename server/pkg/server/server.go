@@ -1,36 +1,45 @@
 package server
 
 import (
-	"fmt"
 	"log"
 	"net"
+	"sync"
 )
 
 type Server struct {
-	config  Config
-	clients map[uint]*Client
+	mu               *sync.RWMutex
+	config           Config
+	clients          map[uint]*Client
+	broadcastChannel chan Message
 }
 
-var G *Server
+type cleanUpFunc func(clientID uint)
 
-type Config struct {
-	Host string
-	Port string
+type Message struct {
+	content string
 }
 
-func (c Config) toString() string {
-	return fmt.Sprintf("%s:%s", c.Host, c.Port)
-}
+// I dont think its needed
+// var singleInstance *Server
+//
+// func New(config Config) *Server {
+// 	if singleInstance != nil {
+// 		return singleInstance
+// 	}
+// 	singleInstance = &Server{
+// 		config:  config,
+// 		clients: make(map[uint]*Client),
+// 	}
+// 	return singleInstance
+// }
 
 func New(config Config) *Server {
-	if G == nil {
-		G = &Server{
-			config:  config,
-			clients: make(map[uint]*Client),
-		}
+	return &Server{
+		mu:               &sync.RWMutex{},
+		config:           config,
+		clients:          make(map[uint]*Client),
+		broadcastChannel: make(chan Message),
 	}
-
-	return G
 }
 
 func (s *Server) Run() {
@@ -40,6 +49,7 @@ func (s *Server) Run() {
 	}
 	defer listener.Close()
 
+	go s.broadcast()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -47,7 +57,33 @@ func (s *Server) Run() {
 		}
 		client := NewClient(conn)
 
+		s.mu.Lock()
 		s.clients[client.id] = client
-		go client.handleRequest()
+		s.mu.Unlock()
+		go client.handleRequest(s.broadcastChannel, s.clientCleanup)
 	}
+}
+
+func (s *Server) broadcast() {
+	for {
+		msg := <-s.broadcastChannel
+		s.mu.RLock()
+		for _, client := range s.clients {
+			_, err := client.conn.Write([]byte(msg.content))
+			if err != nil {
+				log.Println(err)
+			}
+		}
+		s.mu.RUnlock()
+	}
+}
+
+func (s *Server) clientCleanup(clientID uint) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	c := s.clients[clientID]
+	_ = c.conn.Close()
+
+	delete(s.clients, clientID)
 }

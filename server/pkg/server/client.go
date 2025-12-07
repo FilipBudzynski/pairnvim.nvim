@@ -2,7 +2,6 @@ package server
 
 import (
 	"bufio"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -22,31 +21,20 @@ func NewClient(conn net.Conn) *Client {
 	}
 }
 
-func (c *Client) handleRequest() {
+func (c *Client) handleRequest(channel chan Message, cleanup cleanUpFunc) {
 	reader := bufio.NewReader(c.conn)
 	for {
 		message, err := reader.ReadString('\n')
 		if err != nil {
-			c.conn.Close()
-			delete(G.clients, c.id)
+			cleanup(c.id)
 			return
 		}
-		fmt.Printf("Message incoming: %s", string(message))
 
-		// Send to all clients except self here
 		_, err = c.conn.Write([]byte("Message received.\n"))
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 
-		for key, client := range G.clients {
-			if key == c.id {
-				continue
-			}
-			_, err = client.conn.Write([]byte(string(message)))
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
+		channel <- Message{content: message}
 	}
 }
